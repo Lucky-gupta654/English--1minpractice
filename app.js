@@ -1,0 +1,37 @@
+(() => {
+  const bank = window.QUESTION_BANK || [];
+  const KEY = 'spinSpeak.v1';
+  const initial = { used: [], topicsPracticed: 0, sessions: 0, history: [], notes: {}, currentId: null, day: '', today: 0, dark: false };
+  let data = initial, storageOK = true, current = null, remaining = 60, endAt = 0, tick = null, spinning = false, rotation = 0;
+  const $ = id => document.getElementById(id);
+  const els = {wheel:$('wheel'),spin:$('spin'),category:$('category'),difficulty:$('difficulty'),mood:$('mood'),question:$('question'),categoryTag:$('categoryTag'),levelTag:$('levelTag'),time:$('time'),bar:$('bar'),start:$('start'),restart:$('restart'),toast:$('toast'),history:$('history'),notes:$('notes')};
+  function todayKey(){const d=new Date();return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`}
+  function load(){try{const raw=localStorage.getItem(KEY);if(raw)data={...initial,...JSON.parse(raw)};if(!Number.isFinite(data.topicsPracticed))data.topicsPracticed=data.used.length;if(data.day!==todayKey()){data.day=todayKey();data.today=0}if(!Array.isArray(data.used))data.used=[];if(!Array.isArray(data.history))data.history=[];}catch(e){storageOK=false;data={...initial,day:todayKey()};}}
+  function save(){try{localStorage.setItem(KEY,JSON.stringify(data));}catch(e){if(storageOK)notify('Browser storage is unavailable. Your history may not persist after this page closes.');storageOK=false;}}
+  function notify(message){els.toast.textContent=message;els.toast.classList.add('show');clearTimeout(notify.t);notify.t=setTimeout(()=>els.toast.classList.remove('show'),3000)}
+  const categories=[...new Set(bank.map(q=>q.category))];
+  categories.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;els.category.append(o)});
+  function filtered(){return bank.filter(q=>(els.category.value==='all'||q.category===els.category.value)&&(els.difficulty.value==='all'||q.difficulty===els.difficulty.value)&&(els.mood.value==='all'||q.style===els.mood.value))}
+  function renderStats(){ $('sessions').textContent=data.sessions; $('practiced').textContent=data.topicsPracticed; $('goalLabel').textContent=`${Math.min(data.today,5)} / 5`;const p=Math.min(100,Math.round(data.today/5*100));$('goalPct').textContent=`${p}%`; $('goalRing').style.setProperty('--goal',`${p}%`); }
+  function renderHistory(){els.history.replaceChildren();if(!data.history.length){const s=document.createElement('span');s.className='empty';s.textContent='Your practiced topics will show up here.';els.history.append(s);return}data.history.slice(0,15).forEach(h=>{const d=document.createElement('div');d.className='historyitem';const b=document.createElement('strong');b.textContent=h.text;const s=document.createElement('span');s.textContent=`${h.category} · ${h.date}`;d.append(b,s);els.history.append(d)})}
+  function renderTimer(){const sec=Math.max(0,Math.ceil(remaining));els.time.textContent=`00:${String(sec).padStart(2,'0')}`;els.bar.style.width=`${Math.max(0,remaining/60*100)}%`;els.bar.classList.toggle('done',remaining===0)}
+  function choose(instant=false){if(spinning)return;const available=filtered().filter(q=>!data.used.includes(q.id));if(!available.length){notify('All questions in this selection are used. Reset this category’s questions to start a fresh cycle.');return}const q=available[Math.floor(Math.random()*available.length)];data.used.push(q.id);current=q;data.currentId=q.id;data.notes[q.id]=data.notes[q.id]||'';els.notes.value=data.notes[q.id];els.question.classList.remove('q-placeholder');els.question.textContent=q.text;els.categoryTag.textContent=q.category;els.levelTag.textContent=q.difficulty.toUpperCase();remaining=60;stopTimer();renderTimer();$('start').textContent='Start';
+    const entry={id:q.id,text:q.text,category:q.category,date:new Date().toLocaleDateString(undefined,{month:'short',day:'numeric'})};data.history.unshift(entry);data.history=data.history.slice(0,100);data.today++;data.topicsPracticed++;save();renderStats();renderHistory();
+    if(!instant){spinning=true;els.spin.disabled=true;rotation+=1440+Math.random()*720;els.wheel.style.transform=`rotate(${rotation}deg)`;setTimeout(()=>{spinning=false;els.spin.disabled=false},4050)}else notify('A fresh topic, just for you.');
+  }
+  function stopTimer(){clearInterval(tick);tick=null;endAt=0}
+  function complete(){remaining=0;stopTimer();renderTimer();$('start').textContent='Start';if(current){data.sessions++;save();renderStats()}notify("Time's up! Great work speaking for a full minute.");try{const C=window.AudioContext||window.webkitAudioContext;if(C){const c=new C(),o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=660;g.gain.value=.08;o.start();o.stop(c.currentTime+.25)}}catch(e){}}
+  function timerTick(){remaining=Math.max(0,(endAt-Date.now())/1000);renderTimer();if(remaining<=0)complete()}
+  function startPause(){if(!current){notify('Spin for a topic before starting your minute.');return}if(tick){remaining=Math.max(0,(endAt-Date.now())/1000);stopTimer();renderTimer();els.start.textContent='Resume';return}if(remaining<=0){notify('Choose Next Topic or Restart to begin another minute.');return}endAt=Date.now()+remaining*1000;els.start.textContent='Pause';tick=setInterval(timerTick,100)}
+  function reset(){const cat=els.category.value;const qs=cat==='all'?bank:bank.filter(q=>q.category===cat);const ids=new Set(qs.map(q=>q.id));data.used=data.used.filter(id=>!ids.has(id));data.history=data.history.filter(h=>!ids.has(h.id));save();renderStats();renderHistory();notify(cat==='all'?'All question cycles have been reset.':`${cat} question cycle reset.`)}
+  els.spin.addEventListener('click',()=>choose(false));$('surprise').addEventListener('click',()=>choose(true));$('next').addEventListener('click',()=>choose(true));$('start').addEventListener('click',startPause);
+  $('restart').addEventListener('click',()=>{stopTimer();remaining=60;renderTimer();$('start').textContent='Start';if(current)startPause();else notify('Spin for a topic to begin.')});
+  $('reset').addEventListener('click',reset);
+  $('copy').addEventListener('click',async()=>{if(!current){notify('Choose a topic first.');return}try{await navigator.clipboard.writeText(current.text);notify('Question copied.')}catch(e){const t=document.createElement('textarea');t.value=current.text;document.body.append(t);t.select();document.execCommand('copy');t.remove();notify('Question copied.')}});
+  els.notes.addEventListener('input',()=>{if(current){data.notes[current.id]=els.notes.value;save()}});
+  $('clearHistory').addEventListener('click',()=>{data.history=[];save();renderHistory();notify('Practice history cleared.')});
+  $('theme').addEventListener('click',()=>{data.dark=!data.dark;document.body.classList.toggle('dark',data.dark);$('theme').textContent=data.dark?'☀':'☾';save()});
+  load();document.body.classList.toggle('dark',data.dark);$('theme').textContent=data.dark?'☀':'☾';renderStats();renderHistory();renderTimer();$('poolLabel').textContent=`${bank.length} prompts`;
+  current=bank.find(q=>q.id===data.currentId)||null;if(current){els.question.classList.remove('q-placeholder');els.question.textContent=current.text;els.categoryTag.textContent=current.category;els.levelTag.textContent=current.difficulty.toUpperCase();els.notes.value=data.notes[current.id]||''}
+  if(!storageOK)notify('Browser storage is unavailable. Your question history will last only until this page closes.');
+})();
